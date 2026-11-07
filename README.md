@@ -3,6 +3,17 @@
 Preview a Slint component on its own, or compare it at two Git revisions.
 This prototype belongs to NigelBreslaw and deploys to a personal Cloudflare Worker.
 
+## Try It
+
+Open [demonstration PR #1](https://github.com/NigelBreslaw/slint-pr-preview/pull/1) and follow its automated preview comment.
+The left panel shows the original gallery control; the right panel shows rounded square alignment points.
+Select points in either panel, reset the example, or switch to the after-only view.
+Each panel also links to a component-only view.
+
+The build and deployment run entirely in this personal repository.
+The deployment token expires on February 5, 2027.
+Replace the repository's `CLOUDFLARE_API_TOKEN` secret to keep deployments working after that date.
+
 ## Implementation Plan
 
 1. Copy the visual editor gallery's image-alignment example into a standalone window.

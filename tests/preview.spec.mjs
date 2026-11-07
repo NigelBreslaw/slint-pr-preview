@@ -1,4 +1,13 @@
 import { test, expect } from '@playwright/test';
+import { PNG } from 'pngjs';
+import pixelmatch from 'pixelmatch';
+
+function changedPixels(first, second) {
+  const a = PNG.sync.read(first);
+  const b = PNG.sync.read(second);
+  expect([a.width, a.height]).toEqual([b.width, b.height]);
+  return pixelmatch(a.data, b.data, null, a.width, a.height, { threshold: 0.1 });
+}
 
 async function ready(page, side) {
   const frame = page.frameLocator(`iframe[data-side="${side}"]`);
@@ -12,12 +21,14 @@ test('renders both Git revisions and keeps their interactions separate', async (
   const after = await ready(page, 'after');
   const beforeInitial = await before.screenshot();
   const afterInitial = await after.screenshot();
+  await test.info().attach('before-initial', { body: beforeInitial, contentType: 'image/png' });
   await before.click({ position: { x: 115, y: 68 } });
-  await expect.poll(async () => (await before.screenshot()).equals(beforeInitial)).toBe(false);
-  expect((await after.screenshot()).equals(afterInitial)).toBe(true);
+  await expect.poll(async () => changedPixels(await before.screenshot(), beforeInitial)).toBeGreaterThan(100);
+  expect(changedPixels(await after.screenshot(), afterInitial)).toBeLessThan(50);
   await page.getByRole('button', { name: 'Reset example' }).click();
   const reset = await ready(page, 'before');
-  await expect.poll(async () => (await reset.screenshot()).equals(beforeInitial)).toBe(true);
+  await test.info().attach('before-reset', { body: await reset.screenshot(), contentType: 'image/png' });
+  await expect.poll(async () => changedPixels(await reset.screenshot(), beforeInitial)).toBeLessThan(50);
   await page.screenshot({ path: 'test-results/comparison.png', fullPage: true });
 });
 

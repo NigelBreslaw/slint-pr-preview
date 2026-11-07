@@ -69,6 +69,7 @@ jobs:
             }
           };
           visit('preview-deploy/dist');
+          fs.writeFileSync('preview-deploy/dist/_headers', '/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n');
           fs.writeFileSync('preview-deploy/wrangler.jsonc', JSON.stringify({
             name: 'nigel-slint-pr-preview', compatibility_date: '2026-11-07',
             account_id: process.env.CLOUDFLARE_ACCOUNT_ID, preview_urls: true,

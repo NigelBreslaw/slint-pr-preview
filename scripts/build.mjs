@@ -2,22 +2,21 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { normalizeConfig, configHash } from './preview-config.mjs';
 
-const git = (...args) => execFileSync('git', args, { maxBuffer: 24 * 1024 * 1024 });
 const options = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, args) => {
   if (value.startsWith('--')) pairs.push([value.slice(2), args[index + 1]]);
   return pairs;
 }, []));
+const git = (...args) => execFileSync('git', args, { cwd: options['source-dir'] || '.', maxBuffer: 24 * 1024 * 1024 });
 const commit = (ref) => git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`).toString().trim();
 const head = commit(options.head || 'HEAD');
 const base = commit(options.base || head);
 const readAt = (sha, file) => git('show', `${sha}:${file}`);
-const manifestAt = (sha) => JSON.parse(readAt(sha, 'preview.json'));
-const afterManifest = manifestAt(head);
-const beforeManifest = manifestAt(base);
-
-if (afterManifest.schemaVersion !== 1 || beforeManifest.schemaVersion !== 1) throw new Error('Unsupported preview manifest');
-if (afterManifest.runtime !== beforeManifest.runtime) throw new Error('This prototype requires the same interpreter version on both sides');
+if (!options.manifest && !options.request) throw new Error('Pass --manifest <local-json> or --request <CI-request-json>');
+const request = options.request ? JSON.parse(await readFile(options.request, 'utf8')) : null;
+const config = normalizeConfig(request?.configuration.config ?? JSON.parse(await readFile(options.manifest, 'utf8')));
+if (request && (request.headSha !== head || request.configuration.hash !== configHash(config))) throw new Error('Request does not match the build');
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist', { recursive: true });
@@ -50,8 +49,8 @@ for (const [name, sha] of [['before', base], ['after', head]]) {
 }
 
 const runtimeFiles = ['slint_wasm_interpreter.js', 'slint_wasm_interpreter_bg.wasm', 'provenance.json'];
-const provenance = JSON.parse(readAt(head, 'runtime/provenance.json'));
-const runtimeBytes = Object.fromEntries(runtimeFiles.map(file => [file, readAt(head, `runtime/${file}`)]));
+const runtimeBytes = Object.fromEntries(await Promise.all(runtimeFiles.map(async file => [file, await readFile(`runtime/${file}`)])));
+const provenance = JSON.parse(runtimeBytes['provenance.json']);
 const runtimeRoot = `assets/runtime-${digest(Buffer.concat(Object.values(runtimeBytes)))}/`;
 await mkdir(`dist/${runtimeRoot}`, { recursive: true });
 for (const file of runtimeFiles) {
@@ -62,25 +61,21 @@ for (const file of runtimeFiles) {
   await writeFile(`dist/${runtimeRoot}${file}`, bytes);
 }
 
-const examples = afterManifest.examples.map((example) => {
-  if (!/^[a-z0-9-]+$/.test(example.id) || !['compare', 'new'].includes(example.mode)) throw new Error('Invalid example');
-  for (const key of ['entry', 'font']) {
-    if (!example[key] || path.isAbsolute(example[key]) || example[key].split('/').includes('..')) throw new Error(`Invalid ${key}`);
-  }
-  const before = beforeManifest.examples.find((candidate) => candidate.id === example.id);
-  if (example.mode === 'compare' && !before) throw new Error(`No baseline for ${example.id}; set mode to new`);
-  if (before && (before.width !== example.width || before.height !== example.height)) throw new Error('Comparison viewports must match');
-  for (const [side, definition] of [['after', example], ...(example.mode === 'compare' ? [['before', before]] : [])]) {
-    if (!(definition.entry in sourceFiles[side])) throw new Error(`Missing ${side} entry: ${definition.entry}`);
+const examples = config.examples.map((example) => {
+  const before = example.mode === 'compare' ? { ...example, ...(example.before || {}), before: null } : null;
+  for (const [side, definition] of [['after', example], ...(before ? [['before', before]] : [])]) {
+    if (!(definition.entry in sourceFiles[side])) throw new Error(`Missing ${side} entry: ${definition.entry}; use mode new for new components`);
     if (!(definition.font in revisions[side].assets)) throw new Error(`Missing ${side} font: ${definition.font}`);
   }
-  return { ...example, before: before || null };
+  return { ...example, before };
 });
 const manifest = {
   schemaVersion: 1,
-  repository: process.env.GITHUB_REPOSITORY || 'NigelBreslaw/slint-pr-preview',
-  pullRequest: process.env.PR_NUMBER || null,
-  runtime: afterManifest.runtime,
+  ...(request || {
+    repository: 'NigelBreslaw/slint-pr-preview', pullRequest: null, headSha: head, baseSha: base,
+    configuration: { commentId: null, url: null, updatedAt: null, hash: configHash(config), config },
+  }),
+  runtime: provenance.version,
   runtimeModule: `${runtimeRoot}slint_wasm_interpreter.js`,
   runtimeWasm: `${runtimeRoot}slint_wasm_interpreter_bg.wasm`,
   runtimeProvenance: `${runtimeRoot}provenance.json`,

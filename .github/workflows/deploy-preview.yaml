@@ -9,62 +9,86 @@ permissions:
   actions: read
   contents: read
   deployments: write
+  issues: write
   pull-requests: write
 
-concurrency:
-  group: deploy-preview-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: false
-
 jobs:
-  deploy:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+  prepare:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.request.outputs.number }}
     steps:
-      - name: Resolve current personal-repository PR
-        id: pr
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Find preview artifact
+        id: artifact
         uses: actions/github-script@v7
         with:
           script: |
-            const run = context.payload.workflow_run;
-            const { data: prs } = await github.rest.pulls.list({
-              ...context.repo, state: 'open', head: `${context.repo.owner}:${run.head_branch}`,
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...context.repo, run_id: context.payload.workflow_run.id,
             });
-            const pr = prs.find(pr => pr.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` && pr.head.sha === run.head_sha);
-            if (!pr) {
-              core.notice('Skipping a fork, closed PR, or superseded build.');
-              return;
-            }
-            core.setOutput('number', pr.number);
-            core.setOutput('sha', pr.head.sha);
-      - uses: actions/setup-node@v4
-        if: steps.pr.outputs.number != ''
-        with:
-          node-version: 24
+            core.setOutput('exists', artifacts.some(artifact => artifact.name === 'ui-preview' && !artifact.expired));
       - uses: actions/download-artifact@v4
-        if: steps.pr.outputs.number != ''
+        if: steps.artifact.outputs.exists == 'true'
         with:
           name: ui-preview
           path: preview-deploy/dist
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
-      - name: Validate artifact and configure personal Worker
-        if: steps.pr.outputs.number != ''
+      - name: Resolve artifact PR and current configuration
+        id: request
+        if: steps.artifact.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { checkArtifact } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/preview-actions.mjs`);
+            await checkArtifact({ github, context, core });
+
+  deploy:
+    needs: prepare
+    if: needs.prepare.outputs.number != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-preview-${{ needs.prepare.outputs.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-preview
+          path: preview-deploy/dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Recheck PR and configuration before uploading
+        id: request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { checkArtifact } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/preview-actions.mjs`);
+            await checkArtifact({ github, context, core });
+      - name: Validate static artifact and configure personal Worker
+        if: steps.request.outputs.number != ''
         env:
-          HEAD_SHA: ${{ steps.pr.outputs.sha }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
-          if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.CLOUDFLARE_API_TOKEN) throw new Error('Personal Cloudflare repository secrets are not configured');
-          const manifest = JSON.parse(fs.readFileSync('preview-deploy/dist/manifest.json'));
-          if (manifest.revisions.after.sha !== process.env.HEAD_SHA || String(manifest.pullRequest) !== process.env.PR_NUMBER || manifest.repository !== process.env.GITHUB_REPOSITORY) throw new Error('Artifact does not match this PR');
+          if (!process.env.CLOUDFLARE_ACCOUNT_ID) throw new Error('Personal Cloudflare account secret is not configured');
           const visit = directory => {
             for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
               const file = path.join(directory, entry.name);
-              if (entry.isSymbolicLink() || entry.name === '_worker.js' || entry.name === '_redirects' || entry.name === '_headers') throw new Error(`Unexpected artifact file: ${file}`);
+              if (entry.isSymbolicLink() || ['_worker.js', '_redirects', '_headers'].includes(entry.name)) throw new Error(`Unexpected artifact file: ${file}`);
               if (entry.isDirectory()) visit(file);
             }
           };
@@ -77,49 +101,27 @@ jobs:
           }));
           JS
       - name: Upload Worker version
-        if: steps.pr.outputs.number != ''
+        if: steps.request.outputs.number != ''
         id: deploy
         working-directory: preview-deploy
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          PR_NUMBER: ${{ steps.request.outputs.number }}
+          HEAD_SHA: ${{ steps.request.outputs.head }}
+          CONFIG_HASH: ${{ steps.request.outputs.hash }}
         run: |
           set -o pipefail
-          npx --yes wrangler@4.158.0 versions upload --preview-alias "pr-$PR_NUMBER" --message "$HEAD_SHA" 2>&1 | tee /tmp/wrangler-output.txt
+          npx --yes wrangler@4.158.0 versions upload --preview-alias "pr-$PR_NUMBER" --message "$HEAD_SHA config:$CONFIG_HASH" 2>&1 | tee /tmp/wrangler-output.txt
           URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/wrangler-output.txt | head -1)
           test -n "$URL"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-      - name: Publish PR link
+      - name: Publish current PR preview link
         if: steps.deploy.outputs.url != ''
         uses: actions/github-script@v7
         env:
           PREVIEW_URL: ${{ steps.deploy.outputs.url }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          HEAD_SHA: ${{ steps.pr.outputs.sha }}
         with:
           script: |
-            const pull_number = Number(process.env.PR_NUMBER);
-            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number });
-            if (pr.state !== 'open' || pr.head.sha !== process.env.HEAD_SHA) {
-              core.notice('The PR changed during deployment; leaving its preview link unchanged.');
-              return;
-            }
-            const fs = require('node:fs');
-            const manifest = JSON.parse(fs.readFileSync('preview-deploy/dist/manifest.json'));
-            const url = process.env.PREVIEW_URL.replace(/\/$/, '');
-            const marker = '<!-- slint-ui-preview -->';
-            const body = `${marker}\n[Open interactive UI preview](${url}/) · [After only](${url}/?view=after)\n\nBefore: \`${manifest.revisions.before.sha.slice(0, 7)}\` · After: \`${manifest.revisions.after.sha.slice(0, 7)}\``;
-            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pull_number });
-            const existing = comments.find(comment => comment.user.type === 'Bot' && comment.body.includes(marker));
-            if (existing) await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
-            else await github.rest.issues.createComment({ ...context.repo, issue_number: pull_number, body });
-            const { data: deployment } = await github.rest.repos.createDeployment({
-              ...context.repo, ref: process.env.HEAD_SHA, environment: `pr-preview-${pull_number}`,
-              auto_merge: false, required_contexts: [], transient_environment: true, production_environment: false,
-            });
-            await github.rest.repos.createDeploymentStatus({
-              ...context.repo, deployment_id: deployment.id, state: 'success',
-              environment_url: `${url}/`, log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            });
+            const { publishPreview } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/preview-actions.mjs`);
+            await publishPreview({ github, context, core });

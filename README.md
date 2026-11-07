@@ -18,10 +18,10 @@ This prototype belongs to NigelBreslaw and deploys to a personal Cloudflare Work
    Record both exact SHAs in the output.
    Bundle source, fonts, and runtime so the deployed page needs no GitHub access.
 5. Adapt Slint's `.github/workflows/deploy_preview.yaml` in this repository.
-   Build and test on `pull_request`, then publish the artifact in a separate `workflow_run` workflow.
+   Build on PR updates and configuration-comment edits, then publish the artifact in a separate `workflow_run` workflow.
    Use a dedicated personal Worker and repository secrets scoped to the personal Cloudflare account.
    Update one PR comment and a GitHub deployment after a successful publish.
-   Ignore superseded builds before updating the PR link.
+   Ignore builds whose source revision or configuration has been superseded.
 6. Open one demonstration PR that changes the copied control's appearance.
    Verify both versions render and respond independently at the deployed URL.
    Push a second commit to verify the preview link and PR comment update.
@@ -48,23 +48,81 @@ Only branches in this personal repository can publish previews.
 - The comparison shows the actual files from the recorded base and head commits.
 - Selecting an alignment in either frame leaves the other frame unchanged.
 - The after-only and component-only URLs work independently.
-- A later commit updates the existing PR comment without publishing an older build over it.
+- A later commit or configuration-comment edit updates the existing result comment without publishing a superseded build.
 - No workflow or branch in `slint-ui/slint` changes.
+
+## Configure a PR Preview
+
+Add one PR comment starting with `/slint-preview`, followed by a fenced JSON block:
+
+````markdown
+/slint-preview
+
+```json
+{
+  "examples": [
+    {
+      "id": "image-alignment",
+      "title": "Image alignment",
+      "entry": "examples/image-alignment.slint",
+      "mode": "compare",
+      "width": 320,
+      "height": 240
+    }
+  ]
+}
+```
+````
+
+Edit that same comment to redeploy without a commit.
+New commits reuse the current comment.
+The separate bot result comment links back to the configuration and shows its hash.
+No configuration manifest is checked into the PR.
+The generated `manifest.json` belongs to the deployment artifact and freezes the comment configuration and source revisions.
+Old version URLs retain their original configuration.
+
+Use `mode: "new"` to show only the PR's UI.
+Use `mode: "compare"` to show the merge base on the left and the PR head on the right.
+If the component moved, add `"before": { "entry": "examples/old-name.slint" }` to that example.
+The baseline adapter can also override `font`.
+Both sides use the example's `width` and `height`.
+
+The configuration supports up to ten examples with unique lowercase IDs.
+`title` defaults to the ID, `mode` to `compare`, and the viewport to 320 × 240.
+`font` defaults to the bundled Inter font.
+Entry and font paths must be inside `examples/` or `vendor/`.
+The interpreter version stays pinned by the trusted tooling.
+
+Only comments from collaborators with write, maintain, or admin access configure previews.
+Keep exactly one configuration comment; multiple authorized comments or invalid JSON fail the build with an actionable error.
+The Actions run summary records the configuration link, hash, and source SHA.
+Delete the configuration comment to stop future preview builds; existing version URLs remain available.
+After recreating it, or to retry a failed build, run **Build UI Preview** manually with the PR number.
+
+Builds use tooling from `master` and read the selected source files from the requested Git revisions.
+They receive no Cloudflare credentials.
+The deployment workflow rechecks the live PR and comment before uploading and before updating the result link.
+Editing the bot result comment does not trigger a preview build.
 
 ## Local Development
 
+Save the JSON from the configuration comment to a temporary file outside the repository, then run:
+
 ```sh
 npm ci
-npm run build
+npm run test:config
+npm run build -- --manifest /tmp/slint-preview.json
 npm run dev
 ```
 
-To compare two commits:
+To compare two commits with the same external configuration:
 
 ```sh
-npm run build -- --base <base-sha> --head <head-sha>
+npm run build -- --base <base-sha> --head <head-sha> --manifest /tmp/slint-preview.json
 npm test
 ```
+
+The browser smoke checks exercise the prototype's image-alignment fixture in both `new` and `compare` modes.
 
 ## Personal Cloudflare Setup
 
@@ -83,7 +141,8 @@ Set these repository secrets after authenticating to the personal account:
 
 The deployment workflow generates the Cloudflare configuration from trusted workflow code.
 It never runs scripts from the downloaded PR artifact.
-The default Worker URL serves a small landing page; each PR deployment has its own version URL.
+Each PR deployment has its own version URL.
+The default Worker URL changes only when a version is explicitly promoted.
 
 ## Upstream Sources and Licenses
 

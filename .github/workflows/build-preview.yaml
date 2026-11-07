@@ -3,45 +3,77 @@ name: Build UI Preview
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created, edited]
   workflow_dispatch:
+    inputs:
+      pull_request:
+        description: PR number to preview using its configuration comment
+        required: true
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: build-preview-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  issues: read
+  pull-requests: read
 
 jobs:
   build:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/slint-preview') || startsWith(github.event.changes.body.from, '/slint-preview')))
+    concurrency:
+      group: build-preview-${{ github.event.issue.number || github.event.pull_request.number || inputs.pull_request }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out trusted preview tooling
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Package both revisions
+      - run: npm run test:config
+      - name: Snapshot current PR and comment configuration
+        id: request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { prepareBuild } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/preview-actions.mjs`);
+            await prepareBuild({ github, context, core });
+      - name: Check out PR sources without running PR scripts
+        if: steps.request.outputs.number != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.request.outputs.head }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Package requested revisions
+        if: steps.request.outputs.number != ''
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ steps.request.outputs.head }}
+          BASE_SHA: ${{ steps.request.outputs.base }}
         run: |
-          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
-          npm run build -- --base "$MERGE_BASE" --head "$HEAD_SHA"
-      - run: npx playwright install --with-deps chromium
-      - run: npm test
+          MERGE_BASE=$(git -C source merge-base "$BASE_SHA" "$HEAD_SHA")
+          npm run build -- --source-dir source --base "$MERGE_BASE" --head "$HEAD_SHA" --request preview-request.json
+      - if: steps.request.outputs.number != ''
+        run: npx playwright install --with-deps chromium
+      - if: steps.request.outputs.number != ''
+        run: npm test
       - uses: actions/upload-artifact@v4
+        if: steps.request.outputs.number != ''
         with:
           name: ui-preview
           path: dist/
           retention-days: 14
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.request.outputs.number != ''
         with:
           name: preview-screenshots
           path: test-results/

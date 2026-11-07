@@ -7,6 +7,7 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/serve.mjs",
     "test": "playwright test",
+    "test:config": "node --test scripts/preview-config.test.mjs",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Slint PR Preview</title>
   <link rel="stylesheet" href="./style.css">
+  <!--PREVIEW_PRELOADS-->
 </head>
 <body>
   <main>
@@ -24,8 +25,9 @@
     </nav>
     <section id="previews" aria-label="UI previews"></section>
     <p id="error" role="alert" hidden></p>
-    <footer>Each panel runs independently. <a href="./runtime/provenance.json">Slint runtime</a> · <a href="./LICENSE">License</a></footer>
+    <footer>Each panel runs independently. <a id="runtime-info">Slint runtime</a> · <a href="./LICENSE">License</a></footer>
   </main>
+  <!--PREVIEW_MANIFEST-->
   <script type="module" src="./app.js"></script>
 </body>
 </html>

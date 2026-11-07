@@ -43,6 +43,12 @@ The example reproduces the image-alignment section in the visual editor's inspec
 It imports the production `InspectorImageAlignment` control and supplies local selection state.
 The standalone window replaces the surrounding editor and gallery.
 
+The exporter bundles Slint imports and gives the runtime, fonts, scripts, and source bundles content-hashed URLs.
+The parent preloads these assets and passes the configuration directly to each isolated player.
+The players share a compiled wasm module and downloaded assets, with separate instances and UI state.
+Reset reuses the compiled component and existing window; switching views keeps the players alive.
+The deployment workflow adds immutable cache headers for the hashed assets.
+
 The prototype uses a single pinned interpreter for both source revisions.
 It demonstrates component changes; comparing Slint compiler or renderer revisions requires separate runtime builds later.
 Only branches in this personal repository can publish previews.

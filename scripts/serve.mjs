@@ -9,8 +9,13 @@ const server = createServer(async (request, response) => {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
     let file = path.resolve(root, `.${pathname}`);
     if (!file.startsWith(root + path.sep) && file !== root) throw new Error('Invalid path');
-    if ((await stat(file)).isDirectory()) file = path.join(file, 'index.html');
-    response.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    try {
+      if ((await stat(file)).isDirectory()) file = path.join(file, 'index.html');
+    } catch {
+      if (path.extname(file)) throw new Error('Not found');
+      file += '.html';
+    }
+    response.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-store' });
     response.end(await readFile(file));
   } catch {
     response.writeHead(404);

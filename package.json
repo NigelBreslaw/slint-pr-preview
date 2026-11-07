@@ -11,6 +11,8 @@
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
+    "pixelmatch": "8.0.0",
+    "pngjs": "7.0.0",
     "wrangler": "4.158.0"
   }
 }

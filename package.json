@@ -1,0 +1,16 @@
+{
+  "name": "slint-pr-preview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs",
+    "test": "playwright test",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "wrangler": "4.158.0"
+  }
+}

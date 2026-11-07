@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Slint component preview</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    canvas { display: block; }
+    #status { position: absolute; inset: 0; margin: 0; padding: 16px; box-sizing: border-box; font: 12px/1.5 system-ui; white-space: pre-wrap; overflow: auto; color: #334155; background: #f8fafc; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body data-state="loading">
+  <canvas id="preview" aria-label="Interactive Slint component"></canvas>
+  <p id="status" role="status">Loading component…</p>
+  <script type="module" src="./player.js"></script>
+</body>
+</html>

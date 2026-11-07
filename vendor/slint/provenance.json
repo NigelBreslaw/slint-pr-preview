@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/slint-ui/slint",
+  "revision": "97bb2e5b555fcc10034d5b9fb66f9ee554cc8e10",
+  "gallery": "tools/editor/gallery/pages/controls.slint",
+  "files": [
+    "tools/editor/ui/style.slint",
+    "tools/editor/ui/components/inspector/image-alignment.slint"
+  ]
+}

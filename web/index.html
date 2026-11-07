@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Slint PR Preview</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">SLINT · PR PREVIEW PROTOTYPE</p>
+      <h1 id="title">Loading preview…</h1>
+      <p id="description">Interactive component previews from two Git revisions.</p>
+      <p id="pull-request"></p>
+    </header>
+    <nav aria-label="Preview controls">
+      <label>Example <select id="example"></select></label>
+      <div class="view-switch" aria-label="View">
+        <button id="compare" aria-pressed="true">Before and after</button>
+        <button id="after" aria-pressed="false">After only</button>
+      </div>
+      <button id="reset">Reset example</button>
+    </nav>
+    <section id="previews" aria-label="UI previews"></section>
+    <p id="error" role="alert" hidden></p>
+    <footer>Each panel runs independently. <a href="./runtime/provenance.json">Slint runtime</a> · <a href="./LICENSE">License</a></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

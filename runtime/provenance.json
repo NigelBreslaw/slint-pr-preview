@@ -1,0 +1,9 @@
+{
+  "version": "1.18.0",
+  "source": "https://github.com/slint-ui/slint/tree/v1.18.0",
+  "baseUrl": "https://releases.slint.dev/1.18.0/wasm-interpreter/",
+  "sha256": {
+    "slint_wasm_interpreter.js": "1e8c0b7bc86a2549febf48dc3cb6818e270104fd2375269901acbd59942f4654",
+    "slint_wasm_interpreter_bg.wasm": "11a115d451d82228daf31635683e40ca1eb380a2de3681127450cec898552932"
+  }
+}

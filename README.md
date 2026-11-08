@@ -27,7 +27,7 @@ Replace the repository's `CLOUDFLARE_API_TOKEN` secret to keep deployments worki
    Support an after-only view for new UI.
 4. Package examples from the PR head and its merge base with `master`.
    Record both exact SHAs in the output.
-   Bundle source, fonts, and runtime so the deployed page needs no GitHub access.
+   Package source locally and reference shared immutable fonts and runtime, so the deployed page needs no GitHub access.
 5. Adapt Slint's `.github/workflows/deploy_preview.yaml` in this repository.
    Build on PR updates and configuration-comment edits, then publish the artifact in a separate `workflow_run` workflow.
    Use a dedicated personal Worker and repository secrets scoped to the personal Cloudflare account.
@@ -43,11 +43,13 @@ The example reproduces the image-alignment section in the visual editor's inspec
 It imports the production `InspectorImageAlignment` control and supplies local selection state.
 The standalone window replaces the surrounding editor and gallery.
 
-The exporter bundles Slint imports and gives the runtime, fonts, scripts, and source bundles content-hashed URLs.
+The exporter bundles Slint imports and gives scripts and source bundles content-hashed URLs.
+Deployed previews use one shared origin for content-addressed runtime and font files.
 The parent preloads these assets and passes the configuration directly to each isolated player.
 The players share a compiled wasm module and downloaded assets, with separate instances and UI state.
 Reset reuses the compiled component and existing window; switching views keeps the players alive.
 The deployment workflow adds immutable cache headers for the hashed assets.
+The shared host also permits cross-origin loading and exposes resource timing for cache verification.
 
 The prototype uses a single pinned interpreter for both source revisions.
 It demonstrates component changes; comparing Slint compiler or renderer revisions requires separate runtime builds later.
@@ -134,6 +136,38 @@ npm test
 ```
 
 The browser smoke checks exercise the prototype's image-alignment fixture in both `new` and `compare` modes.
+
+## Shared Runtime and Font Hosting
+
+`nigel-slint-preview-assets` serves the shared files at:
+
+```text
+https://nigel-slint-preview-assets.nigel-breslaw.workers.dev
+```
+
+Every deployed preview references the same absolute URLs for unchanged runtime and font bytes.
+Runtime directories and font filenames use full SHA-256 hashes.
+These files have a one-year immutable cache policy, CORS permission, and `Timing-Allow-Origin: *`.
+The runtime bundle includes its JavaScript loader, wasm, and provenance; license files are retained alongside the assets.
+
+The build checks a self-contained package locally, then produces a deployment package with shared URLs and a separate `shared-assets` artifact.
+The deployment workflow publishes shared assets before uploading the PR preview version.
+It retains all files in the existing catalog and verifies their hashes before adding new files.
+A changed runtime or font gets a new URL; old preview URLs retain access to the old files.
+Deployments are serialized across this prototype repository to preserve the shared catalog.
+The catalog has a 1,000-file guard; it fails instead of silently dropping retained assets.
+
+Local builds remain self-contained unless `--shared-assets-base <origin>` is supplied.
+To verify cache reuse across two deployed preview origins, run:
+
+```sh
+npm run verify:shared-cache -- <first-preview-url> <second-preview-url> /tmp/slint-cache-evidence
+```
+
+This uses a fresh Chromium profile, opens both URLs, then restarts the browser with the same profile.
+It requires positive cold transfer sizes, zero warm transfer sizes, and browser cache-hit evidence for wasm and font.
+It saves screenshots and `verification.json`.
+Cache reuse applies within a browser cache partition; separate app hosts or browser profiles may download their own copies.
 
 ## Personal Cloudflare Setup
 

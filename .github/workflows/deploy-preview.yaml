@@ -53,7 +53,7 @@ jobs:
     if: needs.prepare.outputs.number != ''
     runs-on: ubuntu-latest
     concurrency:
-      group: deploy-preview-${{ needs.prepare.outputs.number }}
+      group: deploy-preview-and-shared-assets
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +69,12 @@ jobs:
           path: preview-deploy/dist
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: shared-assets
+          path: shared-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Recheck PR and configuration before uploading
         id: request
         uses: actions/github-script@v7
@@ -76,6 +82,9 @@ jobs:
           script: |
             const { checkArtifact } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/preview-actions.mjs`);
             await checkArtifact({ github, context, core });
+      - name: Retain and verify shared runtime and font assets
+        if: steps.request.outputs.number != ''
+        run: node scripts/prepare-shared-assets.mjs --incoming shared-input --out shared-deploy/dist
       - name: Validate static artifact and configure personal Worker
         if: steps.request.outputs.number != ''
         env:
@@ -94,12 +103,24 @@ jobs:
           };
           visit('preview-deploy/dist');
           fs.writeFileSync('preview-deploy/dist/_headers', '/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n');
+          fs.writeFileSync('shared-deploy/wrangler.jsonc', JSON.stringify({
+            name: 'nigel-slint-preview-assets', compatibility_date: '2026-11-08',
+            account_id: process.env.CLOUDFLARE_ACCOUNT_ID, preview_urls: false,
+            assets: { directory: './dist' },
+          }));
           fs.writeFileSync('preview-deploy/wrangler.jsonc', JSON.stringify({
             name: 'nigel-slint-pr-preview', compatibility_date: '2026-11-07',
             account_id: process.env.CLOUDFLARE_ACCOUNT_ID, preview_urls: true,
             assets: { directory: './dist' },
           }));
           JS
+      - name: Publish shared assets at their stable origin
+        if: steps.request.outputs.number != ''
+        working-directory: shared-deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.158.0 deploy
       - name: Upload Worker version
         if: steps.request.outputs.number != ''
         id: deploy

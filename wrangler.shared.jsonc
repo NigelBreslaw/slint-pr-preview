@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nigel-slint-preview-assets",
+  "account_id": "a993e54a3f3b468de91f1d9d6d9499e7",
+  "compatibility_date": "2026-11-08",
+  "preview_urls": false,
+  "assets": { "directory": "./shared-deploy/dist" }
+}

@@ -61,7 +61,8 @@ test('reset and view changes retain players without fetching assets again', asyn
 });
 
 test('loads source bundles and one shared font without manifest or import requests', async ({ page }) => {
-  const compare = (await (await page.request.get('/manifest.json')).json()).examples[0].mode === 'compare';
+  const manifest = await (await page.request.get('/manifest.json')).json();
+  const compare = manifest.examples[0].mode === 'compare';
   const requests = [];
   page.on('request', request => requests.push(request.url()));
   await page.goto('/');
@@ -72,6 +73,13 @@ test('loads source bundles and one shared font without manifest or import reques
   expect(fontUrls).toHaveLength(1);
   const response = await page.request.get(fontUrls[0]);
   expect(response.headers()['cache-control']).toContain('immutable');
+  if (manifest.sharedAssetsBase) {
+    expect(new URL(fontUrls[0]).origin).toBe(manifest.sharedAssetsBase);
+    expect(requests.filter(url => url.endsWith('.wasm'))).toEqual([manifest.runtimeWasm]);
+    expect(new URL(manifest.runtimeWasm).origin).toBe(manifest.sharedAssetsBase);
+    expect(response.headers()['access-control-allow-origin']).toBe('*');
+    expect(response.headers()['timing-allow-origin']).toBe('*');
+  }
 });
 
 test('opens the after-only and component-only views', async ({ page }) => {

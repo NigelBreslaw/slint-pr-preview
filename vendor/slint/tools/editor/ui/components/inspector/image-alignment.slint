@@ -24,17 +24,17 @@ component AlignmentPoint inherits FocusScope {
     }
 
     Rectangle {
-        border-radius: 15px;
+        border-radius: 8px;
         background: root.selected || touch.has-hover ? Colors.focus-background : transparent;
         border-width: root.has-focus ? Metrics.focus-width * 0.75 : 0px;
         border-color: Colors.focus;
 
         Rectangle {
-            x: 7.5px;
-            y: 7.5px;
-            width: 15px;
-            height: 15px;
-            border-radius: 7.5px;
+            x: 6px;
+            y: 6px;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
             background: root.selected ? Colors.accent : Colors.surface;
             border-width: root.selected ? 0px : Metrics.border-width * 0.75;
             border-color: Colors.border;

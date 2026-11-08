@@ -66,6 +66,21 @@ jobs:
         run: npx playwright install --with-deps chromium
       - if: steps.request.outputs.number != ''
         run: npm test
+      - name: Package shared asset URLs for deployment
+        if: steps.request.outputs.number != ''
+        env:
+          HEAD_SHA: ${{ steps.request.outputs.head }}
+          BASE_SHA: ${{ steps.request.outputs.base }}
+        run: |
+          MERGE_BASE=$(git -C source merge-base "$BASE_SHA" "$HEAD_SHA")
+          SHARED_BASE=$(node --input-type=module -e "import { sharedAssetsBase } from './scripts/shared-assets.mjs'; process.stdout.write(sharedAssetsBase)")
+          npm run build -- --source-dir source --base "$MERGE_BASE" --head "$HEAD_SHA" --request preview-request.json --shared-assets-base "$SHARED_BASE"
+      - uses: actions/upload-artifact@v4
+        if: steps.request.outputs.number != ''
+        with:
+          name: shared-assets
+          path: shared-dist/
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: steps.request.outputs.number != ''
         with:

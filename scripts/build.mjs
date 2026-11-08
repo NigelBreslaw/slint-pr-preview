@@ -3,11 +3,14 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeConfig, configHash } from './preview-config.mjs';
+import { catalogText, fontFile, runtimeDigest, runtimeFiles, sha256 } from './shared-assets.mjs';
 
 const options = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, args) => {
   if (value.startsWith('--')) pairs.push([value.slice(2), args[index + 1]]);
   return pairs;
 }, []));
+const sharedBase = options['shared-assets-base']?.replace(/\/$/, '');
+if (sharedBase && (new URL(sharedBase).origin !== sharedBase || !/^https?:$/.test(new URL(sharedBase).protocol))) throw new Error('Shared asset base must be an absolute origin');
 const git = (...args) => execFileSync('git', args, { cwd: options['source-dir'] || '.', maxBuffer: 24 * 1024 * 1024 });
 const commit = (ref) => git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`).toString().trim();
 const head = commit(options.head || 'HEAD');
@@ -19,6 +22,14 @@ const config = normalizeConfig(request?.configuration.config ?? JSON.parse(await
 if (request && (request.headSha !== head || request.configuration.hash !== configHash(config))) throw new Error('Request does not match the build');
 
 await rm('dist', { recursive: true, force: true });
+await rm('shared-dist', { recursive: true, force: true });
+const sharedFiles = new Map();
+async function sharedAsset(file, bytes) {
+  await mkdir(path.dirname(`shared-dist/${file}`), { recursive: true });
+  await writeFile(`shared-dist/${file}`, bytes);
+  sharedFiles.set(file, { path: file, sha256: sha256(bytes), size: bytes.length });
+  return `${sharedBase}/${file}`;
+}
 await mkdir('dist', { recursive: true });
 await mkdir('dist/assets', { recursive: true });
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex').slice(0, 20);
@@ -39,26 +50,31 @@ for (const [name, sha] of [['before', base], ['after', head]]) {
     const target = path.join('dist', root, file);
     await mkdir(path.dirname(target), { recursive: true });
     const bytes = readAt(sha, file);
-    await writeFile(target, bytes);
+    if (!sharedBase || !fontFile(file)) await writeFile(target, bytes);
+    if (file.endsWith('.license') || /OFL[^/]*\.txt$/.test(file)) await sharedAsset(`licenses/${sha256(bytes)}.txt`, bytes);
     if (file.endsWith('.slint')) sources[file] = bytes.toString();
-    else assets[file] = await asset('file', path.extname(file), bytes);
+    else if (fontFile(file)) {
+      const shared = await sharedAsset(`fonts/${sha256(bytes)}${path.extname(file).toLowerCase()}`, bytes);
+      assets[file] = sharedBase ? shared : await asset('file', path.extname(file), bytes);
+    } else assets[file] = await asset('file', path.extname(file), bytes);
   }
   sourceFiles[name] = sources;
   const sourceBundle = await asset('sources', '.json', JSON.stringify(sources));
   revisions[name] = { sha, root, sourceBundle, assets };
 }
 
-const runtimeFiles = ['slint_wasm_interpreter.js', 'slint_wasm_interpreter_bg.wasm', 'provenance.json'];
 const runtimeBytes = Object.fromEntries(await Promise.all(runtimeFiles.map(async file => [file, await readFile(`runtime/${file}`)])));
 const provenance = JSON.parse(runtimeBytes['provenance.json']);
-const runtimeRoot = `assets/runtime-${digest(Buffer.concat(Object.values(runtimeBytes)))}/`;
-await mkdir(`dist/${runtimeRoot}`, { recursive: true });
+const sharedRuntimeRoot = `runtime/${runtimeDigest(runtimeBytes)}/`;
+const runtimeRoot = sharedBase ? `${sharedBase}/${sharedRuntimeRoot}` : `assets/runtime-${digest(Buffer.concat(Object.values(runtimeBytes)))}/`;
+if (!sharedBase) await mkdir(`dist/${runtimeRoot}`, { recursive: true });
 for (const file of runtimeFiles) {
   const bytes = runtimeBytes[file];
   if (file !== 'provenance.json' && createHash('sha256').update(bytes).digest('hex') !== provenance.sha256[file]) {
     throw new Error(`Runtime checksum mismatch: ${file}`);
   }
-  await writeFile(`dist/${runtimeRoot}${file}`, bytes);
+  await sharedAsset(`${sharedRuntimeRoot}${file}`, bytes);
+  if (!sharedBase) await writeFile(`dist/${runtimeRoot}${file}`, bytes);
 }
 
 const examples = config.examples.map((example) => {
@@ -75,6 +91,7 @@ const manifest = {
     repository: 'NigelBreslaw/slint-pr-preview', pullRequest: null, headSha: head, baseSha: base,
     configuration: { commentId: null, url: null, updatedAt: null, hash: configHash(config), config },
   }),
+  sharedAssetsBase: sharedBase || null,
   runtime: provenance.version,
   runtimeModule: `${runtimeRoot}slint_wasm_interpreter.js`,
   runtimeWasm: `${runtimeRoot}slint_wasm_interpreter_bg.wasm`,
@@ -95,8 +112,9 @@ const preload = new Set([
   ...Object.values(revisions).map(revision => revision.sourceBundle),
   ...examples.flatMap(example => [revisions.after.assets[example.font], ...(example.before ? [revisions.before.assets[example.before.font]] : [])]),
 ]);
-const preloads = `<link rel="modulepreload" href="./${manifest.runtimeModule}">\n` +
-  [...preload].map(file => `<link rel="preload" href="./${file}" as="fetch" crossorigin>`).join('\n');
+const href = file => /^https?:\/\//.test(file) ? file : `./${file}`;
+const preloads = `<link rel="modulepreload" href="${href(manifest.runtimeModule)}">\n` +
+  [...preload].map(file => `<link rel="preload" href="${href(file)}" as="fetch" crossorigin>`).join('\n');
 const indexHtml = (await readFile('web/index.html', 'utf8'))
   .replace('./app.js', `./${appScript}`)
   .replace('./style.css', `./${stylesheet}`)
@@ -105,4 +123,7 @@ const indexHtml = (await readFile('web/index.html', 'utf8'))
 await writeFile('dist/index.html', indexHtml);
 await writeFile('dist/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
 await cp('LICENSE', 'dist/LICENSE');
+const license = await readFile('LICENSE');
+await sharedAsset(`licenses/${sha256(license)}.txt`, license);
+await writeFile('shared-dist/catalog.json', catalogText(sharedFiles.values()));
 console.log(`Packaged ${examples.length} example(s): ${base.slice(0, 7)} → ${head.slice(0, 7)}`);
